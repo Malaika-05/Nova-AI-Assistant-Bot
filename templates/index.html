@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nova — AI Study Assistant</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ SIDEBAR ══ -->
+  <aside class="sidebar">
+
+    <div class="brand">
+      <div class="brand-icon">N</div>
+      <div>
+        <div class="brand-name">Nova</div>
+        <div class="brand-sub">AI Study Buddy</div>
+      </div>
+    </div>
+
+    <div class="section-label">Subject</div>
+    <select id="subject-select" onchange="setSubject(this.value)">
+      <option value="General">General</option>
+      <option value="Computer Science">Computer Science</option>
+      <option value="Mathematics">Mathematics</option>
+      <option value="Physics">Physics</option>
+      <option value="Chemistry">Chemistry</option>
+      <option value="Statistics">Statistics</option>
+      <option value="Data Structures">Data Structures</option>
+      <option value="Algorithms">Algorithms</option>
+    </select>
+
+    <div class="section-label" style="margin-top:16px">Mode</div>
+    <div class="mode-list">
+      <button class="mode-btn active" id="btn-chat"      onclick="switchMode('chat')">
+        <span class="mode-icon">💬</span><span class="mode-label-text">Chat</span>
+      </button>
+      <button class="mode-btn" id="btn-quiz"      onclick="switchMode('quiz')">
+        <span class="mode-icon">📝</span><span class="mode-label-text">Quiz me</span>
+      </button>
+      <button class="mode-btn" id="btn-summarize" onclick="switchMode('summarize')">
+        <span class="mode-icon">📋</span><span class="mode-label-text">Summarize</span>
+      </button>
+      <button class="mode-btn" id="btn-solve"     onclick="switchMode('solve')">
+        <span class="mode-icon">🔢</span><span class="mode-label-text">Solve</span>
+      </button>
+      <button class="mode-btn" id="btn-flashcard" onclick="switchMode('flashcard')">
+        <span class="mode-icon">🃏</span><span class="mode-label-text">Flashcards</span>
+      </button>
+    </div>
+
+    <div class="hint-box" id="mode-hint">Ask me anything! 💡</div>
+
+    <div class="sidebar-footer">
+      <button class="footer-btn footer-purple" onclick="toggleHistory()">📂 History</button>
+      <button class="footer-btn footer-green"  onclick="saveSession()">⬇ Export PDF</button>
+      <button class="footer-btn footer-red"    onclick="resetChat()">🗑 New Chat</button>
+    </div>
+
+  </aside>
+
+  <!-- ══ HISTORY PANEL ══ -->
+  <div class="history-overlay" id="history-overlay" onclick="closeHistory()"></div>
+  <div class="history-panel" id="history-panel">
+    <div class="history-header">
+      <span>📂 Past Sessions</span>
+      <button class="history-close-btn" onclick="closeHistory()">✕</button>
+    </div>
+    <div class="history-list" id="history-list">
+      <div class="history-empty">Click "History" to load your past sessions.</div>
+    </div>
+  </div>
+
+  <!-- ══ MAIN ══ -->
+  <main class="main">
+
+    <div class="topbar">
+      <div class="topbar-left">
+        <span class="topbar-mode" id="mode-label">💬 Chat</span>
+        <span class="topbar-subject" id="subject-label">General</span>
+      </div>
+      <div class="topbar-right">
+        <button id="theme-btn" onclick="toggleTheme()">☀ Light</button>
+        <span class="powered-txt">Powered by Llama 3.3 · Free</span>
+      </div>
+    </div>
+
+    <div class="chatbox" id="chat-box">
+      <div class="msg bot">
+        <div class="avatar">N</div>
+        <div class="bubble">
+          Hey! I'm <strong>Nova</strong>, your AI study buddy! 👋<br><br>
+          Here's what I can do:<br><br>
+          💬 <strong>Chat</strong> — explain any topic simply<br>
+          📝 <strong>Quiz</strong> — test your knowledge instantly<br>
+          📋 <strong>Summarize</strong> — quick revision notes<br>
+          🔢 <strong>Solve</strong> — step-by-step problem solving<br>
+          🃏 <strong>Flashcards</strong> — flip cards for fast revision<br><br>
+          Your chats are <strong>saved automatically</strong> 💾 — tap 📂 History anytime to revisit them!
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <button id="mic-btn" onclick="toggleVoice()" title="Voice input">🎤</button>
+      <input type="text" id="user-input" placeholder="Ask Nova anything..." autocomplete="off"
+             onkeydown="if(event.key==='Enter') sendMessage()">
+      <button id="send-btn" onclick="sendMessage()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+
+  </main>
+</div><!-- /.app -->
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+let currentMode    = "chat";
+let currentSubject = "General";
+
+const HINTS = {
+  chat:      "Ask me anything! 💡",
+  quiz:      "Type a topic → get 5 MCQs 📝",
+  summarize: "Type a topic → get revision notes 📋",
+  solve:     "Type a problem → step-by-step solution 🔢",
+  flashcard: "Type a topic → get 5 flip cards 🃏"
+};
+const PLACEHOLDERS = {
+  chat:      "Ask Nova anything...",
+  quiz:      "Topic for quiz e.g. Python loops...",
+  summarize: "Topic to summarize e.g. OOP...",
+  solve:     "Problem e.g. solve x² + 5x + 6 = 0...",
+  flashcard: "Topic for flashcards e.g. Data Structures..."
+};
+const MODE_EMOJI = { chat:"💬", quiz:"📝", summarize:"📋", solve:"🔢", flashcard:"🃏" };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THEME
+// ─────────────────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const light = document.body.classList.toggle("light-mode");
+  document.getElementById("theme-btn").textContent = light ? "🌙 Dark" : "☀ Light";
+  localStorage.setItem("theme", light ? "light" : "dark");
+}
+(function applyTheme() {
+  if (localStorage.getItem("theme") === "light") {
+    document.body.classList.add("light-mode");
+    document.getElementById("theme-btn").textContent = "🌙 Dark";
+  }
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODE + SUBJECT
+// ─────────────────────────────────────────────────────────────────────────────
+function switchMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("btn-" + mode).classList.add("active");
+  document.getElementById("mode-hint").textContent  = HINTS[mode];
+  document.getElementById("user-input").placeholder = PLACEHOLDERS[mode];
+  document.getElementById("mode-label").textContent =
+    MODE_EMOJI[mode] + " " + mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
+function setSubject(s) {
+  currentSubject = s;
+  document.getElementById("subject-label").textContent = s;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function scrollBottom() {
+  const cb = document.getElementById("chat-box");
+  setTimeout(() => cb.scrollTop = cb.scrollHeight, 80);
+}
+
+function appendMessage(role, content, isHTML = false) {
+  const cb   = document.getElementById("chat-box");
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+
+  if (role === "bot") {
+    const av = document.createElement("div");
+    av.className = "avatar";
+    av.textContent = "N";
+    wrap.appendChild(av);
+  }
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.innerHTML = isHTML ? content : marked.parse(content);
+  wrap.appendChild(bubble);
+  cb.appendChild(wrap);
+  scrollBottom();
+  return wrap;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUIZ
+// ─────────────────────────────────────────────────────────────────────────────
+function parseAndRenderQuiz(text) {
+  const blocks    = text.split("###").map(b => b.trim()).filter(b => b.length > 10);
+  const questions = [];
+
+  blocks.forEach(block => {
+    const qM   = block.match(/Q\d+:\s*(.+)/);
+    const aM   = block.match(/A\)\s*(.+)/);
+    const bM   = block.match(/B\)\s*(.+)/);
+    const cM   = block.match(/C\)\s*(.+)/);
+    const dM   = block.match(/D\)\s*(.+)/);
+    const ansM = block.match(/ANSWER:\s*([ABCD])/i);
+    const expM = block.match(/EXPLANATION:\s*(.+)/i);
+    if (qM && ansM) {
+      questions.push({
+        q:      qM[1].trim(),
+        opts:   { A: aM?.[1]?.trim()||"", B: bM?.[1]?.trim()||"",
+                  C: cM?.[1]?.trim()||"", D: dM?.[1]?.trim()||"" },
+        answer: ansM[1].toUpperCase(),
+        exp:    expM ? expM[1].trim() : ""
+      });
+    }
+  });
+
+  if (!questions.length) return null;
+  const qid = "quiz_" + Date.now();
+  let html = `<div class="quiz-wrap" id="${qid}">`;
+
+  questions.forEach((q, i) => {
+    html += `<div class="quiz-q" id="${qid}_q${i}" data-done="0">
+      <div class="quiz-num">Question ${i+1} / ${questions.length}</div>
+      <div class="quiz-text">${q.q}</div>
+      <div class="quiz-opts">`;
+    ["A","B","C","D"].forEach(l => {
+      if (q.opts[l])
+        html += `<button class="opt" data-quiz="${qid}" data-qi="${i}" data-letter="${l}"
+          data-answer="${q.answer}" data-exp="${q.exp.replace(/"/g,"&quot;")}"
+          data-total="${questions.length}" onclick="pickAnswer(this)">
+          <span class="opt-badge">${l}</span><span>${q.opts[l]}</span></button>`;
+    });
+    html += `</div><div class="quiz-fb" id="${qid}_fb${i}"></div></div>`;
+  });
+  html += `<div class="score-box" id="${qid}_score" style="display:none"></div></div>`;
+  return html;
+}
+
+function pickAnswer(btn) {
+  const qid    = btn.dataset.quiz;
+  const qi     = parseInt(btn.dataset.qi);
+  const chosen = btn.dataset.letter;
+  const correct= btn.dataset.answer;
+  const exp    = btn.dataset.exp;
+  const total  = parseInt(btn.dataset.total);
+  const qDiv   = document.getElementById(qid + "_q" + qi);
+
+  if (qDiv.dataset.done === "1") return;
+  qDiv.dataset.done = "1";
+
+  qDiv.querySelectorAll(".opt").forEach(b => {
+    b.disabled = true;
+    if (b.dataset.letter === correct)      b.classList.add("opt-correct");
+    else if (b.dataset.letter === chosen)  b.classList.add("opt-wrong");
+  });
+
+  const fb = document.getElementById(qid + "_fb" + qi);
+  fb.className    = "quiz-fb " + (chosen === correct ? "fb-correct" : "fb-wrong");
+  fb.style.display = "block";
+  fb.innerHTML = (chosen === correct)
+    ? `✅ Correct! ${exp}`
+    : `❌ Correct answer is <strong>${correct}</strong>. ${exp}`;
+
+  const wrap = document.getElementById(qid);
+  const allQ = wrap.querySelectorAll(".quiz-q");
+  let answered = 0, score = 0;
+  allQ.forEach(qd => {
+    if (qd.dataset.done === "1") {
+      answered++;
+      if (!qd.querySelector(".opt-wrong")) score++;
+    }
+  });
+
+  if (answered === total) {
+    const pct = Math.round(score / total * 100);
+    const msg = pct === 100 ? "Perfect! You're amazing! 🏆"
+              : pct >= 80  ? "Great job! Almost perfect! 🌟"
+              : pct >= 60  ? "Good effort! Keep revising! 💪"
+              :               "Keep studying — you'll get it! 📚";
+    const sb = document.getElementById(qid + "_score");
+    sb.style.display = "block";
+    sb.innerHTML = `<div class="score-num">${score}/${total}</div><div class="score-msg">${msg}</div>`;
+    scrollBottom();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FLASHCARDS
+// ─────────────────────────────────────────────────────────────────────────────
+function parseAndRenderFlashcards(text) {
+  const cards = [];
+  // Split by CARD1, CARD2, etc.
+  const blocks = text.split(/CARD\d+/i).map(b => b.trim()).filter(Boolean);
+  
+  blocks.forEach(block => {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    let front = '', back = '';
+    lines.forEach(line => {
+      if (line.toUpperCase().startsWith('FRONT:')) 
+        front = line.replace(/^FRONT:\s*/i, '').trim();
+      if (line.toUpperCase().startsWith('BACK:')) 
+        back = line.replace(/^BACK:\s*/i, '').trim();
+    });
+    if (front && back) cards.push({ front, back });
+  });
+
+  if (cards.length === 0) return '<p style="color:white;">No valid flashcards found.</p>';
+
+  let html = `<div class="fc-grid">`;
+  cards.forEach(c => {
+    html += `
+    <div class="fc" onclick="this.classList.toggle('flipped')">
+      <div class="fc-inner">
+        <div class="fc-front">
+          <div class="fc-tag">📘 TERM</div>
+          <div class="fc-text">${escapeHtml(c.front)}</div>
+          <div class="fc-tap">tap to flip →</div>
+        </div>
+        <div class="fc-back">
+          <div class="fc-tag">✨ ANSWER</div>
+          <div class="fc-text">${escapeHtml(c.back)}</div>
+          <div class="fc-tap">← tap to flip</div>
+        </div>
+      </div>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function escapeHtml(str) {
+  return str.replace(/[&<>]/g, function(m) {
+    if (m === '&') return '&amp;';
+    if (m === '<') return '&lt;';
+    if (m === '>') return '&gt;';
+    return m;
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// VOICE INPUT
+// ─────────────────────────────────────────────────────────────────────────────
+let recognition = null;
+let voiceSent   = false;
+
+function toggleVoice() {
+  if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
+    alert("Voice input not supported. Please use Chrome.");
+    return;
+  }
+  if (recognition) {
+    recognition.abort();
+    recognition = null;
+    voiceSent   = false;
+    document.getElementById("mic-btn").classList.remove("listening");
+    return;
+  }
+
+  const SR  = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang            = "en-US";
+  recognition.interimResults  = false;   // only fire once on final result
+  recognition.maxAlternatives = 1;
+  recognition.continuous      = false;   // one utterance only
+  voiceSent = false;
+
+  document.getElementById("mic-btn").classList.add("listening");
+
+  recognition.onresult = (e) => {
+    if (voiceSent) return;        // guard against duplicates
+    voiceSent = true;
+    const transcript = e.results[0][0].transcript.trim();
+    if (transcript) {
+      document.getElementById("user-input").value = transcript;
+      sendMessage();              // send — do NOT call recognition.stop() before this
+    }
+  };
+
+  recognition.onend = () => {
+    document.getElementById("mic-btn").classList.remove("listening");
+    recognition = null;
+    voiceSent   = false;
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === "no-speech") {
+      appendMessage("bot", "🎤 I didn't catch that. Try speaking clearly!");
+    } else if (e.error !== "aborted") {
+      console.error("Speech error:", e.error);
+    }
+    document.getElementById("mic-btn").classList.remove("listening");
+    recognition = null;
+    voiceSent   = false;
+  };
+
+  recognition.start();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEND MESSAGE
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendMessage() {
+  const input = document.getElementById("user-input");
+  const msg   = input.value.trim();
+  if (!msg) return;
+
+  appendMessage("user", msg);
+  input.value = "";
+  document.getElementById("send-btn").disabled = true;
+  document.getElementById("mic-btn").disabled  = true;
+
+  const thinking = appendMessage("bot",
+    `<div class="thinking"><span></span><span></span><span></span>
+     <em>Nova is thinking...</em></div>`, true);
+
+  try {
+    const res  = await fetch("/chat", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ message: msg, mode: currentMode, subject: currentSubject })
+    });
+    const data = await res.json();
+    thinking.remove();
+
+    if (currentMode === "quiz") {
+      const html = parseAndRenderQuiz(data.reply);
+      html ? appendMessage("bot", html, true) : appendMessage("bot", data.reply);
+    } else if (currentMode === "flashcard") {
+      const html = parseAndRenderFlashcards(data.reply);
+      html ? appendMessage("bot", html, true) : appendMessage("bot", data.reply);
+    } else {
+      appendMessage("bot", data.reply);
+    }
+  } catch (err) {
+    thinking.remove();
+    appendMessage("bot", "⚠️ Can't reach the server. Make sure Flask is running!");
+  }
+
+  document.getElementById("send-btn").disabled = false;
+  document.getElementById("mic-btn").disabled  = false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESET
+// ─────────────────────────────────────────────────────────────────────────────
+async function resetChat() {
+  await fetch("/reset", { method: "POST" });
+  document.getElementById("chat-box").innerHTML = `
+    <div class="msg bot">
+      <div class="avatar">N</div>
+      <div class="bubble">New chat started! 🚀 Pick a mode and ask me anything.</div>
+    </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HISTORY PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+function toggleHistory() {
+  const panel   = document.getElementById("history-panel");
+  const overlay = document.getElementById("history-overlay");
+  if (panel.classList.contains("open")) {
+    closeHistory();
+  } else {
+    panel.classList.add("open");
+    overlay.classList.add("show");
+    fetchHistory();
+  }
+}
+
+function closeHistory() {
+  document.getElementById("history-panel").classList.remove("open");
+  document.getElementById("history-overlay").classList.remove("show");
+}
+
+async function fetchHistory() {
+  const list = document.getElementById("history-list");
+  list.innerHTML = `<div class="history-empty">Loading...</div>`;
+
+  try {
+    const res      = await fetch("/sessions");
+    const sessions = await res.json();
+
+    if (!sessions.length) {
+      list.innerHTML = `<div class="history-empty">No past sessions yet.<br>
+        Start chatting — history saves automatically!</div>`;
+      return;
+    }
+
+    list.innerHTML = "";
+    const ICONS = { chat:"💬", quiz:"📝", summarize:"📋", solve:"🔢", flashcard:"🃏" };
+
+    sessions.forEach(s => {
+      const icon = ICONS[s.mode] || "💬";
+      const date = new Date(s.updated_at).toLocaleDateString("en-US",
+        { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+
+      const item = document.createElement("div");
+      item.className = "history-item";
+      item.innerHTML = `
+        <div class="history-item-main" onclick="loadSession('${s.session_id}')">
+          <div class="history-item-icon">${icon}</div>
+          <div class="history-item-info">
+            <div class="history-item-title">${s.title}</div>
+            <div class="history-item-meta">${s.subject} · ${date}</div>
+          </div>
+        </div>
+        <button class="history-delete-btn"
+          onclick="deleteSession('${s.session_id}', this)" title="Delete">✕</button>`;
+      list.appendChild(item);
+    });
+
+  } catch (err) {
+    list.innerHTML = `<div class="history-empty">⚠️ Could not load history.<br>
+      Make sure Flask is running.</div>`;
+    console.error("History fetch error:", err);
+  }
+}
+
+async function loadSession(sessionId) {
+  closeHistory();
+  const cb = document.getElementById("chat-box");
+  cb.innerHTML = `
+    <div class="msg bot">
+      <div class="avatar">N</div>
+      <div class="bubble">📂 <strong>Loaded past session</strong> — here's your conversation:</div>
+    </div>`;
+
+  try {
+    const res  = await fetch(`/sessions/${sessionId}`);
+    const msgs = await res.json();
+
+    if (!msgs.length) {
+      appendMessage("bot", "This session has no messages.");
+      return;
+    }
+
+    msgs.forEach(m => {
+      if (m.role === "user") {
+        appendMessage("user", m.content);
+      } else {
+        const wrap   = document.createElement("div");
+        wrap.className = "msg bot";
+        const av     = document.createElement("div");
+        av.className = "avatar"; av.textContent = "N";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.innerHTML = marked.parse(m.content);
+        wrap.appendChild(av); wrap.appendChild(bubble);
+        cb.appendChild(wrap);
+      }
+    });
+    scrollBottom();
+  } catch (err) {
+    appendMessage("bot", "⚠️ Could not load this session.");
+  }
+}
+
+async function deleteSession(sessionId, btn) {
+  if (!confirm("Delete this session permanently?")) return;
+  try {
+    await fetch(`/sessions/${sessionId}`, { method: "DELETE" });
+    const item = btn.closest(".history-item");
+    item.remove();
+    const list = document.getElementById("history-list");
+    if (!list.querySelector(".history-item")) {
+      list.innerHTML = `<div class="history-empty">No past sessions yet.</div>`;
+    }
+  } catch (err) {
+    alert("Could not delete session.");
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORT PDF
+// ─────────────────────────────────────────────────────────────────────────────
+function saveSession() {
+  const pw = window.open("", "_blank");
+  if (!pw) { alert("Allow popups to export PDF."); return; }
+
+  let body = "";
+  document.querySelectorAll("#chat-box .msg").forEach(msg => {
+    const isUser = msg.classList.contains("user");
+    const text   = msg.querySelector(".bubble")?.innerText || "";
+    if (!text.trim()) return;
+    body += `<div class="msg ${isUser ? "u" : "b"}">
+      <div class="lbl">${isUser ? "You" : "Nova"}</div>
+      <div class="bbl">${text.replace(/\n/g,"<br>")}</div>
+    </div>`;
+  });
+
+  pw.document.write(`<!DOCTYPE html><html><head><title>Nova Study Session</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:30px;max-width:800px;margin:0 auto;color:#111}
+      h1{color:#6d28d9;font-size:22px} .meta{color:#888;font-size:13px;margin-bottom:20px}
+      hr{border:none;border-top:1px solid #ddd;margin-bottom:20px}
+      .msg{margin-bottom:14px} .lbl{font-size:11px;font-weight:700;text-transform:uppercase;
+      letter-spacing:.06em;color:#888;margin-bottom:3px}
+      .u{text-align:right} .u .lbl{color:#6d28d9}
+      .u .bbl{display:inline-block;background:#6d28d9;color:#fff;padding:10px 16px;
+        border-radius:16px 16px 4px 16px;max-width:70%;text-align:left}
+      .b .bbl{display:inline-block;background:#f3f3f3;padding:10px 16px;
+        border-radius:4px 16px 16px 16px;max-width:80%}
+      .bbl{font-size:14px;line-height:1.7}
+    </style></head><body>
+    <h1>📚 Nova Study Session</h1>
+    <div class="meta">${new Date().toLocaleString()}</div>
+    <hr>${body}</body></html>`);
+  pw.document.close();
+  setTimeout(() => pw.print(), 400);
+}
+</script>
+</body>
+</html>
