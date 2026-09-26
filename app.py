@@ -1,8 +1,7 @@
-from flask import Flask, request, jsonify, render_template
+import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq
 import os
-import json
 import time
 import re
 import sqlite3
@@ -11,12 +10,15 @@ from datetime import datetime
 
 load_dotenv()
 
-app = Flask(__name__)
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# ── CONFIG ─────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Nova - AI Study Buddy", page_icon="🎯", layout="wide")
 
-# ── DATABASE ──────────────────────────────────────────────────────────────────
+client = Groq(api_key=os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", ""))
+
 DB_PATH = "studybot.db"
+MODEL_NAME = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was deprecated by Groq
 
+# ── DATABASE ───────────────────────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -45,12 +47,12 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def create_session(subject, mode, first_message):
     session_id = str(uuid.uuid4())[:8]
@@ -65,6 +67,7 @@ def create_session(subject, mode, first_message):
     conn.close()
     return session_id
 
+
 def save_message(session_id, role, content, mode, subject):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db()
@@ -76,7 +79,37 @@ def save_message(session_id, role, content, mode, subject):
     conn.commit()
     conn.close()
 
-# ── PROMPTS ───────────────────────────────────────────────────────────────────
+
+def get_sessions():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT session_id, title, subject, mode, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 30"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_session_messages(session_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT role, content, mode, subject, timestamp FROM messages WHERE session_id=? ORDER BY id ASC",
+        (session_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_session(session_id):
+    conn = get_db()
+    conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+    conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+# ── PROMPTS ────────────────────────────────────────────────────────────────
 PROMPTS = {
     "chat": """You are Nova, a super friendly and clever AI study buddy for university students.
 
@@ -186,142 +219,125 @@ BACK: [clear answer, max 20 words]
 Rules: No extra text. FRONT and BACK on separate lines. Keep text SHORT."""
 }
 
-# ── STATE ─────────────────────────────────────────────────────────────────────
-conversation_history = []
-current_subject = "General"
-current_mode = "chat"
-current_session_id = None
+MODES = list(PROMPTS.keys())
 
-# ── ROUTES ────────────────────────────────────────────────────────────────────
-@app.route("/")
-def home():
-    return render_template("index.html")
+# ── SESSION STATE ──────────────────────────────────────────────────────────
+if "messages" not in st.session_state:
+    st.session_state.messages = []          # [{"role": "user"/"assistant", "content": ...}]
+if "current_session_id" not in st.session_state:
+    st.session_state.current_session_id = None
+if "mode" not in st.session_state:
+    st.session_state.mode = "chat"
+if "subject" not in st.session_state:
+    st.session_state.subject = "General"
 
 
-@app.route("/chat", methods=["POST"])
-def chat():
-    global current_subject, current_mode, conversation_history, current_session_id
-    try:
-        data = request.json
-        user_message = data.get("message", "").strip()
-        current_mode = data.get("mode", "chat")
-        current_subject = data.get("subject", "General")
+def start_new_chat():
+    st.session_state.messages = []
+    st.session_state.current_session_id = None
 
-        if not user_message:
-            return jsonify({"error": "Empty message"}), 400
 
-        # Create session on first message
-        if current_session_id is None:
-            current_session_id = create_session(current_subject, current_mode, user_message)
+def load_chat(session_id, mode, subject):
+    st.session_state.current_session_id = session_id
+    st.session_state.mode = mode
+    st.session_state.subject = subject
+    rows = get_session_messages(session_id)
+    st.session_state.messages = [{"role": r["role"], "content": r["content"]} for r in rows]
 
-        system = PROMPTS.get(current_mode, PROMPTS["chat"])
-        if current_subject != "General":
-            system += f"\n\nStudent is studying: {current_subject}. Keep examples relevant."
 
-        conversation_history.append({"role": "user", "content": user_message})
+# ── SIDEBAR ────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("🎯 Nova")
+    st.caption("Your AI study buddy")
 
-        # Keep last 6 messages to save tokens
-        if len(conversation_history) > 6:
-            conversation_history = conversation_history[-6:]
+    if st.button("➕ New chat", use_container_width=True):
+        start_new_chat()
+        st.rerun()
 
-        # API call with rate-limit retry
-        response = None
+    st.session_state.mode = st.selectbox(
+        "Mode", MODES, index=MODES.index(st.session_state.mode),
+        format_func=lambda m: m.capitalize()
+    )
+    st.session_state.subject = st.text_input("Subject", value=st.session_state.subject)
+
+    st.divider()
+    st.caption("Recent sessions")
+
+    for s in get_sessions():
+        col1, col2 = st.columns([5, 1])
+        label = f"{s['title'] or '(untitled)'}"
+        active = s["session_id"] == st.session_state.current_session_id
+        with col1:
+            if st.button(("👉 " if active else "") + label, key=f"load_{s['session_id']}", use_container_width=True):
+                load_chat(s["session_id"], s["mode"], s["subject"])
+                st.rerun()
+        with col2:
+            if st.button("🗑️", key=f"del_{s['session_id']}"):
+                delete_session(s["session_id"])
+                if st.session_state.current_session_id == s["session_id"]:
+                    start_new_chat()
+                st.rerun()
+
+# ── MAIN CHAT AREA ─────────────────────────────────────────────────────────
+st.header("Nova — AI Study Buddy 🎯")
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+user_message = st.chat_input("Ask Nova anything...")
+
+if user_message:
+    mode = st.session_state.mode
+    subject = st.session_state.subject
+
+    if st.session_state.current_session_id is None:
+        st.session_state.current_session_id = create_session(subject, mode, user_message)
+
+    st.session_state.messages.append({"role": "user", "content": user_message})
+    with st.chat_message("user"):
+        st.markdown(user_message)
+
+    system = PROMPTS.get(mode, PROMPTS["chat"])
+    if subject != "General":
+        system += f"\n\nStudent is studying: {subject}. Keep examples relevant."
+
+    # keep last 6 messages to save tokens
+    api_history = st.session_state.messages[-6:]
+
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        placeholder.markdown("⏳ Thinking...")
+
+        reply = None
         for attempt in range(3):
             try:
                 response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "system", "content": system}] + conversation_history,
+                    model=MODEL_NAME,
+                    messages=[{"role": "system", "content": system}] + api_history,
                     max_tokens=1000,
                     temperature=0.7
                 )
+                reply = response.choices[0].message.content
                 break
             except Exception as api_err:
                 err_str = str(api_err)
                 if "429" in err_str and attempt < 2:
                     match = re.search(r'try again in (\d+\.?\d*)s', err_str)
                     wait = float(match.group(1)) + 0.5 if match else 4.0
-                    print(f"Rate limited. Waiting {wait}s...")
+                    placeholder.markdown(f"⏳ Rate limited, retrying in {wait:.0f}s...")
                     time.sleep(wait)
+                elif "429" in err_str:
+                    reply = "⏳ Too many requests. Wait a moment and try again!"
                 else:
-                    conversation_history.pop()
-                    if "429" in err_str:
-                        return jsonify({"reply": "⏳ Too many requests. Wait a moment and try again!"}), 200
-                    raise
+                    reply = f"Oops! Something went wrong: {err_str}"
 
-        if not response:
-            conversation_history.pop()
-            return jsonify({"reply": "⏳ No response received. Please try again."}), 200
+        if reply is None:
+            reply = "⏳ No response received. Please try again."
 
-        reply = response.choices[0].message.content
-        conversation_history.append({"role": "assistant", "content": reply})
+        placeholder.markdown(reply)
 
-        # Save to DB
-        save_message(current_session_id, "user",      user_message, current_mode, current_subject)
-        save_message(current_session_id, "assistant", reply,        current_mode, current_subject)
+    st.session_state.messages.append({"role": "assistant", "content": reply})
 
-        return jsonify({"reply": reply, "mode": current_mode, "session_id": current_session_id})
-
-    except Exception as e:
-        print("ERROR:", str(e))
-        return jsonify({"reply": f"Oops! Something went wrong: {str(e)}"}), 500
-
-
-@app.route("/reset", methods=["POST"])
-def reset():
-    global conversation_history, current_session_id
-    conversation_history = []
-    current_session_id = None
-    return jsonify({"status": "reset"})
-
-
-@app.route("/sessions", methods=["GET"])
-def get_sessions():
-    try:
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT session_id, title, subject, mode, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 30"
-        ).fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except Exception as e:
-        print("Sessions error:", e)
-        return jsonify([]), 200
-
-
-@app.route("/sessions/<session_id>", methods=["GET"])
-def get_session_messages(session_id):
-    try:
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT role, content, mode, subject, timestamp FROM messages WHERE session_id=? ORDER BY id ASC",
-            (session_id,)
-        ).fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except Exception as e:
-        print("Session messages error:", e)
-        return jsonify([]), 200
-
-
-@app.route("/sessions/<session_id>", methods=["DELETE"])
-def delete_session(session_id):
-    try:
-        conn = get_db()
-        conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
-        conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "deleted"})
-    except Exception as e:
-        print("Delete error:", e)
-        return jsonify({"status": "error"}), 500
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
-
-import os
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    save_message(st.session_state.current_session_id, "user", user_message, mode, subject)
+    save_message(st.session_state.current_session_id, "assistant", reply, mode, subject)

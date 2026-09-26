@@ -2,3 +2,7 @@ echo venv/ > .gitignore
 echo .env >> .gitignore
 echo __pycache__/ >> .gitignore
 .env
+venv/
+studybot.db
+__pycache__/
+.env
